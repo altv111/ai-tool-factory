@@ -1,0 +1,9 @@
+{
+  "name": "Error Explainer",
+  "default_configuration": {
+    "target_role": "",
+    "error_type": "JavaScript runtime error",
+    "audience": "junior developer",
+    "conversion_style": ""
+  }
+}

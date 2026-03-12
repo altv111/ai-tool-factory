@@ -1,0 +1,9 @@
+{
+  "name": "Resume Tool",
+  "default_configuration": {
+    "target_role": "software engineer",
+    "error_type": "",
+    "audience": "",
+    "conversion_style": ""
+  }
+}

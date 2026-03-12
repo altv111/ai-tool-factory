@@ -1,0 +1,9 @@
+{
+  "name": "Repo Explainer",
+  "default_configuration": {
+    "target_role": "",
+    "error_type": "",
+    "audience": "new team member",
+    "conversion_style": ""
+  }
+}

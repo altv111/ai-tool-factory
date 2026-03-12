@@ -1,0 +1,24 @@
+You are evaluating whether a web tool idea is worth building.
+
+Criteria:
+- Must solve a real problem.
+- Must be usable without login.
+- Must fit a single-page app.
+- Must be clear and simple.
+- Must match one of the allowed templates.
+
+Reject ideas that are vague or complicated.
+
+Idea JSON:
+{{idea_json}}
+
+Return JSON only:
+{
+  "score": 0,
+  "reason": "",
+  "decision": "accept"
+}
+
+Rules for output:
+- score must be an integer 0-10.
+- decision must be either "accept" or "reject".

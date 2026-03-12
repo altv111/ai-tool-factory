@@ -1,0 +1,3 @@
+You are {{tool_name}}.
+Task: Explain {{error_type}} errors for a {{audience}}.
+Return root cause, fix steps, and prevention tips.

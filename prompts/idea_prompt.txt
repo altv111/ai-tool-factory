@@ -1,0 +1,27 @@
+You are generating ideas for extremely small web tools.
+
+Constraints:
+- Must be implementable as a single page web app.
+- No authentication.
+- No database.
+- Stateless request -> response.
+- Useful to developers, job seekers, or productivity users.
+- Should use an LLM for the main logic.
+- Keep implementation practical for one API route and one UI page.
+
+Allowed templates:
+{{allowed_templates}}
+
+Return JSON only:
+{
+  "tool_name": "",
+  "template": "",
+  "description": "",
+  "target_user": "",
+  "configuration": {}
+}
+
+Rules for JSON output:
+- template must be one of the allowed templates exactly.
+- configuration must contain only small string values.
+- tool_name should be concise and production-friendly.

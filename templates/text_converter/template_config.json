@@ -1,0 +1,9 @@
+{
+  "name": "Text Converter",
+  "default_configuration": {
+    "target_role": "",
+    "error_type": "",
+    "audience": "",
+    "conversion_style": "bullet summary"
+  }
+}
