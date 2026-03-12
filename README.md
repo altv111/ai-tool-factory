@@ -27,6 +27,12 @@ export OPENAI_MODEL="gpt-4o-mini"
 # Optional: max idea/review retries
 export IDEA_MAX_ATTEMPTS="3"
 
+# Optional Turnstile toggles for generated routes
+# Client-side: disable widget + client token requirement
+export NEXT_PUBLIC_TURNSTILE_ENABLED="false"
+# Server-side: disable token verification
+export TURNSTILE_ENABLED="false"
+
 # Preferred: host app root containing app/layout.tsx
 export APP_ROOT_DIR="/home/alpha/Workspace/tooldeck-site"
 
@@ -52,6 +58,18 @@ Default behavior:
   - `app/tools/page.tsx`
   - `app/sitemap.ts`
 - Skips deployment unless `--deploy` is passed.
+
+Template-driven behavior:
+
+- Pass `--template <name>` to generate the child route from `templates/<name>/frontend/page.tsx` and `templates/<name>/api/route.ts`.
+- Template token placeholders are filled using generated idea fields plus template defaults.
+- API calls in template frontend are normalized to `/api/<tool-slug>`.
+
+Steer specific ideas:
+
+```bash
+python3 generator.py --template regex_explainer --idea "Regex debugging helper for interview prep"
+```
 
 Deploy host app:
 
@@ -79,4 +97,8 @@ Useful flags:
 - Generation contract is constrained to child-route modules, not standalone app skeletons.
 - Duplicate slugs are rejected.
 - Forbidden standalone files are blocked (`package.json`, `next.config.js`, `tsconfig.json`, `next-env.d.ts`, nested `layout.tsx`, etc.).
+- Security requirements are mandatory in generated files:
+  - same-origin API gate via `@/lib/request-origin`
+  - Turnstile verification via `@/lib/turnstile`
+  - frontend Turnstile token flow via `react-turnstile`
 - Registry entries include `name`, `route`, `url`, `deployed`, `created_at`.

@@ -25,6 +25,7 @@ from urllib import error, request
 
 BASE_DIR = Path(__file__).resolve().parent
 PROMPTS_DIR = BASE_DIR / "prompts"
+TEMPLATES_DIR = BASE_DIR / "templates"
 GENERATED_DIR = Path(
     os.getenv("GENERATED_TOOLS_DIR", str(BASE_DIR / "generated_tools"))
 ).expanduser()
@@ -197,13 +198,14 @@ def load_registry() -> list[dict[str, Any]]:
     return data
 
 
-def append_registry_entry(idea: Idea, deployed_url: str | None) -> None:
+def append_registry_entry(idea: Idea, deployed_url: str | None, template_name: str | None) -> None:
     registry = load_registry()
     entry = {
         "name": idea.tool_slug,
         "route": f"/{idea.tool_slug}",
         "url": deployed_url,
         "deployed": bool(deployed_url),
+        "template": template_name,
         "created_at": date.today().isoformat(),
     }
     registry.append(entry)
@@ -236,13 +238,26 @@ def existing_tool_slugs(app_root: Path) -> set[str]:
     return slugs
 
 
-def build_idea_prompt(existing_slugs: set[str], feedback: str) -> str:
+def build_idea_prompt(
+    existing_slugs: set[str],
+    feedback: str,
+    idea_hint: str,
+    template_name: str | None,
+) -> str:
     prompt = load_prompt("idea_prompt.txt")
-    return (
+    rendered = (
         prompt.replace("{{existing_slugs}}", ", ".join(sorted(existing_slugs)) or "none")
         .replace("{{required_output_files}}", "\n".join(f"- {f}" for f in REQUIRED_OUTPUT_FILES))
         .replace("{{feedback}}", feedback or "none")
     )
+    extra: list[str] = []
+    if idea_hint.strip():
+        extra.append(f"- User-specified idea direction: {idea_hint.strip()}")
+    if template_name:
+        extra.append(f"- You must shape this idea around template: {template_name}")
+    if extra:
+        rendered += "\n\nAdditional constraints:\n" + "\n".join(extra)
+    return rendered
 
 
 def build_review_prompt(idea: Idea, existing_slugs: set[str]) -> str:
@@ -272,14 +287,20 @@ def review_idea(idea: Idea, existing_slugs: set[str]) -> IdeaReview:
     return parse_idea_review(raw)
 
 
-def generate_idea(existing_slugs: set[str]) -> tuple[Idea, IdeaReview]:
+def generate_idea(
+    existing_slugs: set[str],
+    idea_hint: str = "",
+    template_name: str | None = None,
+) -> tuple[Idea, IdeaReview]:
     max_attempts = max(1, int(os.getenv("IDEA_MAX_ATTEMPTS", "3")))
     latest_review: IdeaReview | None = None
     feedback = ""
 
     for attempt in range(1, max_attempts + 1):
         print(f"Idea generation attempt {attempt}/{max_attempts}...")
-        raw_idea = call_openai_compatible(build_idea_prompt(existing_slugs, feedback))
+        raw_idea = call_openai_compatible(
+            build_idea_prompt(existing_slugs, feedback, idea_hint, template_name)
+        )
         idea = parse_idea(raw_idea)
 
         if idea.tool_slug in existing_slugs:
@@ -306,16 +327,24 @@ def generate_idea(existing_slugs: set[str]) -> tuple[Idea, IdeaReview]:
 def render_page_tsx(idea: Idea) -> str:
     return f'''"use client";
 
-import {{ useState }} from "react";
+import {{ useRef, useState }} from "react";
+import Turnstile from "react-turnstile";
 import ToolLayout from "@/components/ToolLayout";
 
 export default function {camel_component_name(idea.tool_slug)}Page() {{
+  const turnstileRef = useRef<any>(null);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [pendingSubmit, setPendingSubmit] = useState(false);
+  const [turnstileKey, setTurnstileKey] = useState(0);
+  const turnstileEnabled = process.env.NEXT_PUBLIC_TURNSTILE_ENABLED !== "false";
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  const shouldUseTurnstile = turnstileEnabled && Boolean(siteKey);
 
-  async function onSubmit() {{
+  async function submitWithToken(token: string) {{
     setLoading(true);
     setError("");
     setOutput("");
@@ -324,7 +353,7 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
       const res = await fetch("/api/{idea.tool_slug}", {{
         method: "POST",
         headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ input }}),
+        body: JSON.stringify({{ input, turnstileToken: token }}),
       }});
 
       const data = await res.json();
@@ -337,6 +366,33 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
       setError("Network error. Try again.");
     }} finally {{
       setLoading(false);
+      setPendingSubmit(false);
+      setTurnstileToken("");
+      setTurnstileKey((v) => v + 1);
+    }}
+  }}
+
+  async function onSubmit() {{
+    if (loading || !input.trim()) {{
+      return;
+    }}
+    if (turnstileEnabled && !siteKey) {{
+      setError("Turnstile is not configured. Set NEXT_PUBLIC_TURNSTILE_SITE_KEY.");
+      return;
+    }}
+    if (shouldUseTurnstile && !turnstileToken) {{
+      setPendingSubmit(true);
+      turnstileRef.current?.reset?.();
+      turnstileRef.current?.execute?.();
+      return;
+    }}
+    await submitWithToken(turnstileToken);
+  }}
+
+  async function onTurnstileVerify(token: string) {{
+    setTurnstileToken(token);
+    if (pendingSubmit) {{
+      await submitWithToken(token);
     }}
   }}
 
@@ -348,6 +404,23 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
         value={{input}}
         onChange={{(e) => setInput(e.target.value)}}
       />
+      <div className="turnstile-wrap">
+        {{shouldUseTurnstile ? (
+          <Turnstile
+            ref={{turnstileRef}}
+            key={{turnstileKey}}
+            sitekey={{siteKey}}
+            options={{{{ execution: "execute" }}}}
+            onVerify={{(token) => void onTurnstileVerify(token)}}
+            onExpire={{() => setTurnstileToken("")}}
+            onError={{() => setTurnstileToken("")}}
+          />
+        ) : !turnstileEnabled ? (
+          <p className="small">Turnstile disabled via NEXT_PUBLIC_TURNSTILE_ENABLED=false.</p>
+        ) : (
+          <p className="small">Turnstile is not configured. Set NEXT_PUBLIC_TURNSTILE_SITE_KEY.</p>
+        )}}
+      </div>
       <button onClick={{onSubmit}} disabled={{loading || !input.trim()}}>
         {{loading ? "Processing..." : "Generate"}}
       </button>
@@ -365,8 +438,54 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
 '''
 
 
+def replace_tokens(text: str, variables: dict[str, Any]) -> str:
+    out = text
+    for key, value in variables.items():
+        out = out.replace(f"{{{{{key}}}}}", str(value))
+    return out
+
+
+def read_template_defaults(template_path: Path) -> dict[str, Any]:
+    cfg_path = template_path / "template_config.json"
+    if not cfg_path.exists():
+        return {}
+    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return {}
+    default_cfg = data.get("default_configuration", {})
+    return default_cfg if isinstance(default_cfg, dict) else {}
+
+
+def requires_use_client(content: str) -> bool:
+    return bool(
+        re.search(
+            r"\buse(State|Effect|Memo|Callback|Ref|Reducer|LayoutEffect|Transition|DeferredValue|Id|ImperativeHandle|SyncExternalStore|Optimistic|ActionState)\b",
+            content,
+        )
+    )
+
+
+def ensure_use_client_directive(content: str) -> str:
+    stripped = content.lstrip()
+    if stripped.startswith('"use client"') or stripped.startswith("'use client'"):
+        return content
+    if not requires_use_client(content):
+        return content
+    return '"use client";\n\n' + content
+
+
+def normalize_frontend_api_path(content: str, slug: str) -> str:
+    return re.sub(
+        r"""(['"])\/api\/(?:generate|explain)\1""",
+        rf"\1/api/{slug}\1",
+        content,
+    )
+
+
 def render_api_route_ts(idea: Idea) -> str:
     return f'''import {{ NextRequest, NextResponse }} from "next/server";
+import {{ blockedOriginResponse, isRequestFromAllowedOrigin }} from "@/lib/request-origin";
+import {{ verifyTurnstileToken }} from "@/lib/turnstile";
 
 const MAX_REQUESTS_PER_IP = 10;
 const MAX_TOKENS = 900;
@@ -375,6 +494,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const ipCounter = new Map<string, {{ count: number; resetAt: number }}>();
 
 const SYSTEM_PROMPT = `{escape_template_prompt(idea)}`;
+const TURNSTILE_ENABLED = process.env.TURNSTILE_ENABLED !== "false";
 
 function checkIpLimit(ip: string): string | null {{
   const now = Date.now();
@@ -438,6 +558,10 @@ async function callLLM(userInput: string): Promise<string> {{
 
 export async function POST(req: NextRequest) {{
   try {{
+    if (!isRequestFromAllowedOrigin(req)) {{
+      return blockedOriginResponse();
+    }}
+
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 
     const ipError = checkIpLimit(ip);
@@ -446,8 +570,15 @@ export async function POST(req: NextRequest) {{
     }}
 
     const body = await req.json();
-    const input = (body?.input || "").toString().trim();
+    if (TURNSTILE_ENABLED) {{
+      const turnstileToken = (body?.turnstileToken || "").toString().trim();
+      const turnstileResult = await verifyTurnstileToken(turnstileToken, ip);
+      if (!turnstileResult.success) {{
+        return NextResponse.json({{ error: turnstileResult.error }}, {{ status: 403 }});
+      }}
+    }}
 
+    const input = (body?.input || "").toString().trim();
     if (!input) {{
       return NextResponse.json({{ error: "Input is required." }}, {{ status: 400 }});
     }}
@@ -501,6 +632,68 @@ def resolve_app_root() -> Path:
 def write_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+
+def available_templates() -> set[str]:
+    if not TEMPLATES_DIR.exists():
+        return set()
+    return {p.name for p in TEMPLATES_DIR.iterdir() if p.is_dir()}
+
+
+def validate_page_security(page_content: str) -> None:
+    required_snippets = [
+        'import Turnstile from "react-turnstile";',
+        "const turnstileRef = useRef<any>(null);",
+        "const [turnstileToken, setTurnstileToken] = useState(\"\");",
+        "const [pendingSubmit, setPendingSubmit] = useState(false);",
+        "const [turnstileKey, setTurnstileKey] = useState(0);",
+        "const turnstileEnabled = process.env.NEXT_PUBLIC_TURNSTILE_ENABLED !== \"false\";",
+        "const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;",
+        "const shouldUseTurnstile = turnstileEnabled && Boolean(siteKey);",
+        "JSON.stringify({ input, turnstileToken: token })",
+        "turnstileRef.current?.execute?.();",
+        "options={{ execution: \"execute\" }}",
+        "setTurnstileToken(\"\");",
+        "setTurnstileKey((v) => v + 1);",
+        "disabled={loading || !input.trim()}",
+        "<Turnstile",
+    ]
+    missing = [snippet for snippet in required_snippets if snippet not in page_content]
+    if missing:
+        raise GenerationError(
+            "Generated page.tsx is missing mandatory Turnstile security requirements."
+        )
+
+
+def validate_api_security(api_content: str) -> None:
+    required_snippets = [
+        'import { blockedOriginResponse, isRequestFromAllowedOrigin } from "@/lib/request-origin";',
+        'import { verifyTurnstileToken } from "@/lib/turnstile";',
+        "const TURNSTILE_ENABLED = process.env.TURNSTILE_ENABLED !== \"false\";",
+        "if (!isRequestFromAllowedOrigin(req)) {",
+        "return blockedOriginResponse();",
+        "if (TURNSTILE_ENABLED) {",
+        "const turnstileToken = (body?.turnstileToken || \"\").toString().trim();",
+        "const turnstileResult = await verifyTurnstileToken(turnstileToken, ip);",
+        "if (!turnstileResult.success) {",
+        "return NextResponse.json({ error: turnstileResult.error }, { status: 403 });",
+    ]
+    missing = [snippet for snippet in required_snippets if snippet not in api_content]
+    if missing:
+        raise GenerationError(
+            "Generated route.ts is missing mandatory origin/Turnstile security requirements."
+        )
+
+
+def resolve_template(template_name: str | None) -> str | None:
+    if template_name is None:
+        return None
+    templates = available_templates()
+    if not templates:
+        raise GenerationError("No templates found in templates/")
+    if template_name not in templates:
+        raise GenerationError(f"Unknown template: {template_name}")
+    return template_name
 
 
 def upsert_tools_array_entry(
@@ -574,17 +767,7 @@ def validate_output_paths(written_relative_paths: set[str], slug: str) -> None:
             raise GenerationError(f"Forbidden filename generated: {path}")
 
 
-def create_route_module(app_root: Path, idea: Idea) -> set[str]:
-    app_dir = app_root / "app"
-    route_page = app_dir / idea.tool_slug / "page.tsx"
-    api_route = app_dir / "api" / idea.tool_slug / "route.ts"
-
-    if route_page.exists() or api_route.exists():
-        raise GenerationError(f"Route already exists for slug: {idea.tool_slug}")
-
-    write_file(route_page, render_page_tsx(idea))
-    write_file(api_route, render_api_route_ts(idea))
-
+def update_integration_files(app_dir: Path, idea: Idea) -> None:
     home_page = app_dir / "page.tsx"
     tools_page = app_dir / "tools" / "page.tsx"
     sitemap = app_dir / "sitemap.ts"
@@ -615,6 +798,82 @@ def create_route_module(app_root: Path, idea: Idea) -> set[str]:
         raise GenerationError(
             "Integration update failed. One or more files already contained this slug."
         )
+
+
+def create_route_module(app_root: Path, idea: Idea) -> set[str]:
+    app_dir = app_root / "app"
+    route_page = app_dir / idea.tool_slug / "page.tsx"
+    api_route = app_dir / "api" / idea.tool_slug / "route.ts"
+
+    if route_page.exists() or api_route.exists():
+        raise GenerationError(f"Route already exists for slug: {idea.tool_slug}")
+
+    page_content = render_page_tsx(idea)
+    api_content = render_api_route_ts(idea)
+    validate_page_security(page_content)
+    validate_api_security(api_content)
+
+    write_file(route_page, page_content)
+    write_file(api_route, api_content)
+
+    update_integration_files(app_dir, idea)
+
+    written = {
+        f"app/{idea.tool_slug}/page.tsx",
+        f"app/api/{idea.tool_slug}/route.ts",
+        "app/page.tsx",
+        "app/tools/page.tsx",
+        "app/sitemap.ts",
+    }
+    validate_output_paths(written, idea.tool_slug)
+    return written
+
+
+def create_route_module_from_template(app_root: Path, idea: Idea, template_name: str) -> set[str]:
+    app_dir = app_root / "app"
+    route_page = app_dir / idea.tool_slug / "page.tsx"
+    api_route = app_dir / "api" / idea.tool_slug / "route.ts"
+    if route_page.exists() or api_route.exists():
+        raise GenerationError(f"Route already exists for slug: {idea.tool_slug}")
+
+    template_dir = TEMPLATES_DIR / template_name
+    frontend_src = template_dir / "frontend" / "page.tsx"
+    api_src = template_dir / "api" / "route.ts"
+    if not frontend_src.exists() or not api_src.exists():
+        raise GenerationError(
+            f"Template missing required files: {template_name} (frontend/page.tsx and api/route.ts)"
+        )
+
+    defaults = read_template_defaults(template_dir)
+    variables: dict[str, Any] = {
+        **defaults,
+        "tool_name": idea.tool_name,
+        "tool_slug": idea.tool_slug,
+        "description": idea.description,
+        "target_user": idea.target_user,
+        "template": template_name,
+    }
+
+    page_content = replace_tokens(frontend_src.read_text(encoding="utf-8"), variables)
+    page_content = normalize_frontend_api_path(page_content, idea.tool_slug)
+    page_content = ensure_use_client_directive(page_content)
+
+    api_content = replace_tokens(api_src.read_text(encoding="utf-8"), variables)
+
+    # Security requirements are mandatory: if template content omits them,
+    # fall back to the secure scaffold implementations.
+    try:
+        validate_page_security(page_content)
+    except GenerationError:
+        page_content = render_page_tsx(idea)
+    try:
+        validate_api_security(api_content)
+    except GenerationError:
+        api_content = render_api_route_ts(idea)
+
+    write_file(route_page, page_content)
+    write_file(api_route, api_content)
+    update_integration_files(app_dir, idea)
 
     written = {
         f"app/{idea.tool_slug}/page.tsx",
@@ -662,6 +921,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Deploy host app to Vercel after generating route files.",
     )
+    parser.add_argument(
+        "--template",
+        help="Use a specific template from templates/<name> for page/api generation.",
+    )
+    parser.add_argument(
+        "--idea",
+        default="",
+        help="Optional idea direction to steer the LLM (for example: 'accessibility checker for forms').",
+    )
     return parser.parse_args()
 
 
@@ -669,13 +937,21 @@ def main() -> int:
     args = parse_args()
     try:
         app_root = resolve_app_root()
+        template_name = resolve_template(args.template)
         existing_slugs = existing_tool_slugs(app_root)
 
         print("Generating idea...")
-        idea, _review = generate_idea(existing_slugs)
+        idea, _review = generate_idea(
+            existing_slugs,
+            idea_hint=args.idea,
+            template_name=template_name,
+        )
 
         print(f"Creating child route: /{idea.tool_slug}")
-        written = create_route_module(app_root, idea)
+        if template_name:
+            written = create_route_module_from_template(app_root, idea, template_name)
+        else:
+            written = create_route_module(app_root, idea)
         print("Updated files:")
         for path in sorted(written):
             print(f"- {path}")
@@ -689,7 +965,7 @@ def main() -> int:
         else:
             print("Skipping deploy. Pass --deploy to enable Vercel deployment.")
 
-        append_registry_entry(idea, deployed_url)
+        append_registry_entry(idea, deployed_url, template_name)
         print("Done.")
         return 0
     except GenerationError as exc:

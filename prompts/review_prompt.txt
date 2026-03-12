@@ -17,6 +17,10 @@ Criteria:
 - No auth, no database.
 - tool_slug must not duplicate existing slugs.
 - Idea must be feasible as an embedded route, not a standalone app.
+- Must support mandatory security model:
+  - same-origin gate in API route
+  - Turnstile verification before processing input
+  - Turnstile token flow from frontend to API
 
 Return JSON only:
 {

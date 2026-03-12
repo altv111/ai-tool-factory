@@ -13,6 +13,10 @@ Hard constraints:
 - Stateless request -> response.
 - No auth, no database.
 - Useful to developers, job seekers, or productivity users.
+- Security is mandatory in generated code:
+  - API route must enforce same-origin checks via request-origin helpers.
+  - API route must verify `turnstileToken` via turnstile helper before processing input.
+  - Frontend must include Turnstile widget and send `turnstileToken`.
 
 Return JSON only:
 {

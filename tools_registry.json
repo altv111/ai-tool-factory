@@ -4,5 +4,20 @@
     "url": "https://errorexplainer-6f2rgmem6-samwoods83-3636s-projects.vercel.app",
     "template": "error_explainer",
     "created_at": "2026-03-12"
+  },
+  {
+    "name": "code-snippet-formatter",
+    "route": "/code-snippet-formatter",
+    "url": null,
+    "deployed": false,
+    "created_at": "2026-03-12"
+  },
+  {
+    "name": "markdown-to-html",
+    "route": "/markdown-to-html",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "created_at": "2026-03-12"
   }
 ]
