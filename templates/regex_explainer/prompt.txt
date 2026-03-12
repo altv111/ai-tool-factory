@@ -1,0 +1,1 @@
+Explain the regex pattern {{pattern}} in simple terms and provide examples of its usage.

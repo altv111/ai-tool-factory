@@ -1,0 +1,50 @@
+You are generating a new startup-factory app template.
+
+Idea:
+{{idea}}
+
+Attempt number:
+{{attempt}}
+
+Existing templates (avoid naming collisions and avoid near-duplicates):
+{{existing_templates}}
+
+Required template files:
+{{required_files}}
+
+Feedback from previous attempt (if any):
+{{feedback}}
+
+Hard constraints:
+- Output JSON only.
+- The output must include these top-level keys:
+  - template_name (string, lowercase snake/kebab style, unique)
+  - rationale (short string)
+  - files (object mapping relative path -> file content string)
+- Every required file must be present in files.
+- Do not include absolute paths.
+- Do not include ".." path segments.
+- Keep the generated app as a single-page stateless tool.
+- No auth and no database.
+- Use one API route file at api/route.ts and one UI at frontend/page.tsx.
+- Use token placeholders like {{tool_name}} and {{description}} where appropriate.
+- template_config.json must be valid JSON with a default_configuration object.
+- Ensure package.json has scripts for dev/build/start and reasonable Next.js dependencies.
+
+Return this exact JSON shape:
+{
+  "template_name": "",
+  "rationale": "",
+  "files": {
+    "template_config.json": "",
+    "prompt.txt": "",
+    "package.json": "",
+    "tsconfig.json": "",
+    "next.config.js": "",
+    "next-env.d.ts": "",
+    "frontend/page.tsx": "",
+    "api/route.ts": "",
+    "app/layout.tsx": "",
+    "app/globals.css": ""
+  }
+}

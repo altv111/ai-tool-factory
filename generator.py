@@ -168,7 +168,12 @@ def parse_idea_review(raw_content: str) -> IdeaReview:
 
 
 def build_idea_prompt() -> str:
-    template_list = ", ".join(sorted(available_templates()))
+    templates = sorted(available_templates())
+    if not templates:
+        raise GenerationError(
+            "No unused templates found. Add new templates or remove entries from tools_registry.json."
+        )
+    template_list = ", ".join(templates)
     prompt = load_prompt("idea_prompt.txt")
     return prompt.replace("{{allowed_templates}}", template_list)
 
@@ -216,18 +221,36 @@ def generate_idea() -> tuple[Idea, IdeaReview]:
     )
 
 
-def available_templates() -> set[str]:
+def available_templates(include_used: bool = False) -> set[str]:
     if not TEMPLATES_DIR.exists():
         return set()
-    return {p.name for p in TEMPLATES_DIR.iterdir() if p.is_dir()}
+    templates = {p.name for p in TEMPLATES_DIR.iterdir() if p.is_dir()}
+    if include_used:
+        return templates
+    return templates - used_templates()
+
+
+def used_templates() -> set[str]:
+    used: set[str] = set()
+    for entry in load_registry():
+        if not isinstance(entry, dict):
+            continue
+        template = entry.get("template")
+        if isinstance(template, str) and template.strip():
+            used.add(template.strip())
+    return used
 
 
 def select_template(idea: Idea) -> str:
     templates = available_templates()
     if not templates:
-        raise GenerationError("No templates found")
+        raise GenerationError(
+            "No unused templates available. Add a new template or clear used entries from tools_registry.json."
+        )
     if idea.template in templates:
         return idea.template
+    if idea.template in available_templates(include_used=True):
+        raise GenerationError(f"Template already used: {idea.template}")
     raise GenerationError(f"Unknown template: {idea.template}")
 
 

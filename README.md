@@ -36,7 +36,7 @@ export GENERATED_TOOLS_DIR="/home/alpha/Workspace/toolforge-site/apps"
 
 ```bash
 cd startup-factory
-python generator.py
+python3 generator.py
 ```
 
 Expected console flow:
@@ -56,8 +56,24 @@ To generate directly into another repo folder (example `toolforge-site/apps`):
 ```bash
 cd startup-factory
 export GENERATED_TOOLS_DIR="/home/alpha/Workspace/toolforge-site/apps"
-python generator.py
+python3 generator.py
 ```
+
+## Generate new templates with LLM
+
+Use the template generator to create a brand new template under `templates/<template_name>/`.
+
+```bash
+cd startup-factory
+python3 template_generator.py --idea "Regex explainer for junior developers"
+```
+
+Useful flags:
+
+- `--dry-run` to generate and review without writing files
+- `--print-manifest` to print the full manifest JSON
+- `--overwrite` to replace an existing template with the same name
+- `--max-attempts 5` to increase generation/review retries
 
 ## Notes
 

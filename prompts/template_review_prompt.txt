@@ -1,0 +1,32 @@
+You are reviewing a generated startup-factory template manifest.
+
+Original idea:
+{{idea}}
+
+Required files:
+{{required_files}}
+
+Manifest JSON:
+{{manifest_json}}
+
+Review criteria:
+- Template name is clear, production-safe, and not generic.
+- All required files are present.
+- The app remains single-page and stateless.
+- No auth, no database.
+- API route is practical and safe for LLM usage.
+- Frontend and API files are coherent with placeholders.
+- template_config.json looks valid and usable.
+
+Return JSON only:
+{
+  "score": 0,
+  "decision": "reject",
+  "reason": "",
+  "issues": []
+}
+
+Rules:
+- score must be integer 0-10.
+- decision must be "accept" or "reject".
+- issues must be a list of concrete fix items (empty list allowed).
