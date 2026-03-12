@@ -27,7 +27,9 @@ from urllib import error, request
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 PROMPTS_DIR = BASE_DIR / "prompts"
-GENERATED_DIR = BASE_DIR / "generated_tools"
+GENERATED_DIR = Path(
+    os.getenv("GENERATED_TOOLS_DIR", str(BASE_DIR / "generated_tools"))
+).expanduser()
 REGISTRY_PATH = BASE_DIR / "tools_registry.json"
 
 
@@ -289,6 +291,7 @@ def create_project(idea: Idea, template_name: str) -> Path:
     defaults = read_template_defaults(template_dir)
     config = merge_configuration(defaults, idea.configuration)
 
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     slug = slugify(idea.tool_name)
     project_dir = GENERATED_DIR / slug
 

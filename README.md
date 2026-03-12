@@ -26,6 +26,10 @@ export OPENAI_BASE_URL="https://api.openai.com/v1"
 
 # Optional: number of idea generation/review attempts before failing
 export IDEA_MAX_ATTEMPTS="3"
+
+# Optional: where generated Next.js tools are created
+# Default: ./generated_tools
+export GENERATED_TOOLS_DIR="/home/alpha/Workspace/toolforge-site/apps"
 ```
 
 ## Run
@@ -46,6 +50,14 @@ Expected console flow:
 
 Generated project output is written to `generated_tools/<tool-name>/`.
 Deployment metadata is appended to `tools_registry.json`.
+
+To generate directly into another repo folder (example `toolforge-site/apps`):
+
+```bash
+cd startup-factory
+export GENERATED_TOOLS_DIR="/home/alpha/Workspace/toolforge-site/apps"
+python generator.py
+```
 
 ## Notes
 
