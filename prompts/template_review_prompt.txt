@@ -14,8 +14,12 @@ Review criteria:
 - All required files are present.
 - The app remains single-page and stateless.
 - No auth, no database.
-- API route is practical and safe for LLM usage.
+- API route uses project security/shared utility conventions:
+  - `@/lib/request-origin`
+  - `@/lib/turnstile`
+  - `@/lib/openai` (`createChatCompletion`)
 - Frontend and API files are coherent with placeholders.
+- Frontend uses `@/components/ToolLayout` and Turnstile token flow.
 - template_config.json looks valid and usable.
 
 Return JSON only:

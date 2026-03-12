@@ -19,5 +19,13 @@
     "deployed": false,
     "template": null,
     "created_at": "2026-03-12"
+  },
+  {
+    "name": "sql-query-generator",
+    "route": "/sql-query-generator",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "created_at": "2026-03-12"
   }
 ]

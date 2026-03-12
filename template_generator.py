@@ -22,14 +22,8 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 REQUIRED_FILES = [
     "template_config.json",
     "prompt.txt",
-    "package.json",
-    "tsconfig.json",
-    "next.config.js",
-    "next-env.d.ts",
     "frontend/page.tsx",
     "api/route.ts",
-    "app/layout.tsx",
-    "app/globals.css",
 ]
 
 

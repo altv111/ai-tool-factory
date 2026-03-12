@@ -17,10 +17,18 @@ Criteria:
 - No auth, no database.
 - tool_slug must not duplicate existing slugs.
 - Idea must be feasible as an embedded route, not a standalone app.
-- Must support mandatory security model:
+- Must support mandatory implementation standards:
+  - only route-level files (`app/<tool-slug>/page.tsx`, optional `app/api/<tool-slug>/route.ts`)
+  - update app/page.tsx, app/tools/page.tsx, app/sitemap.ts
+  - no standalone project files/folders
+  - shared `@/components/ToolLayout` usage
   - same-origin gate in API route
-  - Turnstile verification before processing input
-  - Turnstile token flow from frontend to API
+  - Turnstile verification before expensive work
+  - frontend Turnstile token flow and immediate-click submit UX
+  - `createChatCompletion` usage for LLM routes
+  - status convention compliance (400/429/502/500)
+
+Reject the idea if likely to violate any checklist item.
 
 Return JSON only:
 {

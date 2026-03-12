@@ -24,12 +24,18 @@ Hard constraints:
 - Every required file must be present in files.
 - Do not include absolute paths.
 - Do not include ".." path segments.
-- Keep the generated app as a single-page stateless tool.
+- Keep template output route-focused for embedding into an existing Next.js app.
 - No auth and no database.
 - Use one API route file at api/route.ts and one UI at frontend/page.tsx.
+- Use `@/components/ToolLayout` in frontend/page.tsx.
+- API route must use:
+  - `@/lib/request-origin`
+  - `@/lib/turnstile`
+  - `@/lib/openai` via `createChatCompletion`
+- Frontend must include Turnstile widget/token handling and pass token in request body.
 - Use token placeholders like {{tool_name}} and {{description}} where appropriate.
 - template_config.json must be valid JSON with a default_configuration object.
-- Ensure package.json has scripts for dev/build/start and reasonable Next.js dependencies.
+- Do not generate standalone project files (package.json, next.config.js, tsconfig.json, next-env.d.ts, app/layout.tsx, app/globals.css, .vercel, .gitignore).
 
 Return this exact JSON shape:
 {
@@ -38,13 +44,7 @@ Return this exact JSON shape:
   "files": {
     "template_config.json": "",
     "prompt.txt": "",
-    "package.json": "",
-    "tsconfig.json": "",
-    "next.config.js": "",
-    "next-env.d.ts": "",
     "frontend/page.tsx": "",
-    "api/route.ts": "",
-    "app/layout.tsx": "",
-    "app/globals.css": ""
+    "api/route.ts": ""
   }
 }

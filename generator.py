@@ -327,24 +327,24 @@ def generate_idea(
 def render_page_tsx(idea: Idea) -> str:
     return f'''"use client";
 
-import {{ useRef, useState }} from "react";
+import {{ useState }} from "react";
 import Turnstile from "react-turnstile";
 import ToolLayout from "@/components/ToolLayout";
+import {{ isTurnstileEnabledClient }} from "@/lib/turnstile-flags";
 
 export default function {camel_component_name(idea.tool_slug)}Page() {{
-  const turnstileRef = useRef<any>(null);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState("");
-  const [pendingSubmit, setPendingSubmit] = useState(false);
   const [turnstileKey, setTurnstileKey] = useState(0);
-  const turnstileEnabled = process.env.NEXT_PUBLIC_TURNSTILE_ENABLED !== "false";
+  const turnstileEnabled = isTurnstileEnabledClient();
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
   const shouldUseTurnstile = turnstileEnabled && Boolean(siteKey);
+  const showTurnstileDisabledMessage = process.env.NODE_ENV !== "production";
 
-  async function submitWithToken(token: string) {{
+  async function submitWithToken(token: string | null) {{
     setLoading(true);
     setError("");
     setOutput("");
@@ -353,7 +353,7 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
       const res = await fetch("/api/{idea.tool_slug}", {{
         method: "POST",
         headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ input, turnstileToken: token }}),
+        body: JSON.stringify({{ input, turnstileToken: token || "" }}),
       }});
 
       const data = await res.json();
@@ -366,7 +366,6 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
       setError("Network error. Try again.");
     }} finally {{
       setLoading(false);
-      setPendingSubmit(false);
       setTurnstileToken("");
       setTurnstileKey((v) => v + 1);
     }}
@@ -380,20 +379,18 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
       setError("Turnstile is not configured. Set NEXT_PUBLIC_TURNSTILE_SITE_KEY.");
       return;
     }}
-    if (shouldUseTurnstile && !turnstileToken) {{
-      setPendingSubmit(true);
-      turnstileRef.current?.reset?.();
-      turnstileRef.current?.execute?.();
+
+    const widgetToken =
+      (globalThis as any)?.turnstile?.getResponse?.()?.toString?.().trim?.() ||
+      turnstileToken ||
+      "";
+
+    if (shouldUseTurnstile && !widgetToken) {{
+      setError("Please wait for verification");
       return;
     }}
-    await submitWithToken(turnstileToken);
-  }}
 
-  async function onTurnstileVerify(token: string) {{
-    setTurnstileToken(token);
-    if (pendingSubmit) {{
-      await submitWithToken(token);
-    }}
+    await submitWithToken(widgetToken || null);
   }}
 
   return (
@@ -407,19 +404,17 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
       <div className="turnstile-wrap">
         {{shouldUseTurnstile ? (
           <Turnstile
-            ref={{turnstileRef}}
             key={{turnstileKey}}
             sitekey={{siteKey}}
-            options={{{{ execution: "execute" }}}}
-            onVerify={{(token) => void onTurnstileVerify(token)}}
+            onVerify={{(token) => setTurnstileToken(token)}}
             onExpire={{() => setTurnstileToken("")}}
             onError={{() => setTurnstileToken("")}}
           />
-        ) : !turnstileEnabled ? (
-          <p className="small">Turnstile disabled via NEXT_PUBLIC_TURNSTILE_ENABLED=false.</p>
-        ) : (
+        ) : turnstileEnabled ? (
           <p className="small">Turnstile is not configured. Set NEXT_PUBLIC_TURNSTILE_SITE_KEY.</p>
-        )}}
+        ) : showTurnstileDisabledMessage ? (
+          <p className="small">Turnstile disabled by configuration.</p>
+        ) : null}}
       </div>
       <button onClick={{onSubmit}} disabled={{loading || !input.trim()}}>
         {{loading ? "Processing..." : "Generate"}}
@@ -431,7 +426,7 @@ export default function {camel_component_name(idea.tool_slug)}Page() {{
           <h2>{escape_ts_string(idea.output_label)}</h2>
           <pre>{{output}}</pre>
         </section>
-      )}}
+        )}}
     </ToolLayout>
   );
 }}
@@ -484,6 +479,7 @@ def normalize_frontend_api_path(content: str, slug: str) -> str:
 
 def render_api_route_ts(idea: Idea) -> str:
     return f'''import {{ NextRequest, NextResponse }} from "next/server";
+import {{ createChatCompletion }} from "@/lib/openai";
 import {{ blockedOriginResponse, isRequestFromAllowedOrigin }} from "@/lib/request-origin";
 import {{ verifyTurnstileToken }} from "@/lib/turnstile";
 
@@ -514,48 +510,6 @@ function checkIpLimit(ip: string): string | null {{
   return null;
 }}
 
-async function callLLM(userInput: string): Promise<string> {{
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const apiKey = openaiKey || geminiKey;
-  if (!apiKey) {{
-    return "LLM placeholder: set OPENAI_API_KEY or GEMINI_API_KEY (plus optional OPENAI_MODEL/OPENAI_BASE_URL) to enable real responses.";
-  }}
-
-  const usingGeminiFallback = Boolean(geminiKey && !openaiKey);
-  const baseUrl = (
-    process.env.OPENAI_BASE_URL ||
-    (usingGeminiFallback
-      ? "https://generativelanguage.googleapis.com/v1beta/openai"
-      : "https://api.openai.com/v1")
-  ).replace(/\\/$/, "");
-  const model = process.env.OPENAI_MODEL || (usingGeminiFallback ? "gemini-2.0-flash" : "gpt-4o-mini");
-
-  const response = await fetch(`${{baseUrl}}/chat/completions`, {{
-    method: "POST",
-    headers: {{
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${{apiKey}}`,
-    }},
-    body: JSON.stringify({{
-      model,
-      max_tokens: MAX_TOKENS,
-      messages: [
-        {{ role: "system", content: SYSTEM_PROMPT }},
-        {{ role: "user", content: userInput }},
-      ],
-    }}),
-  }});
-
-  if (!response.ok) {{
-    const errorText = await response.text();
-    throw new Error(`LLM error: ${{errorText}}`);
-  }}
-
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content || "No output generated.";
-}}
-
 export async function POST(req: NextRequest) {{
   try {{
     if (!isRequestFromAllowedOrigin(req)) {{
@@ -570,11 +524,11 @@ export async function POST(req: NextRequest) {{
     }}
 
     const body = await req.json();
+    const turnstileToken = (body?.turnstileToken || "").toString().trim();
     if (TURNSTILE_ENABLED) {{
-      const turnstileToken = (body?.turnstileToken || "").toString().trim();
       const turnstileResult = await verifyTurnstileToken(turnstileToken, ip);
       if (!turnstileResult.success) {{
-        return NextResponse.json({{ error: turnstileResult.error }}, {{ status: 403 }});
+        return NextResponse.json({{ error: turnstileResult.error }}, {{ status: 400 }});
       }}
     }}
 
@@ -583,11 +537,19 @@ export async function POST(req: NextRequest) {{
       return NextResponse.json({{ error: "Input is required." }}, {{ status: 400 }});
     }}
 
-    const output = await callLLM(input);
-    return NextResponse.json({{ output }});
+    const result = await createChatCompletion(
+      [
+        {{ role: "system", content: SYSTEM_PROMPT }},
+        {{ role: "user", content: input }},
+      ],
+      MAX_TOKENS,
+    );
+
+    return NextResponse.json({{ output: result.content }});
   }} catch (err) {{
     const message = err instanceof Error ? err.message : "Unknown server error.";
-    return NextResponse.json({{ error: message }}, {{ status: 500 }});
+    const status = message.startsWith("Upstream LLM request failed") ? 502 : 500;
+    return NextResponse.json({{ error: message }}, {{ status }});
   }}
 }}
 '''
@@ -643,16 +605,15 @@ def available_templates() -> set[str]:
 def validate_page_security(page_content: str) -> None:
     required_snippets = [
         'import Turnstile from "react-turnstile";',
-        "const turnstileRef = useRef<any>(null);",
+        'import { isTurnstileEnabledClient } from "@/lib/turnstile-flags";',
         "const [turnstileToken, setTurnstileToken] = useState(\"\");",
-        "const [pendingSubmit, setPendingSubmit] = useState(false);",
         "const [turnstileKey, setTurnstileKey] = useState(0);",
-        "const turnstileEnabled = process.env.NEXT_PUBLIC_TURNSTILE_ENABLED !== \"false\";",
+        "const turnstileEnabled = isTurnstileEnabledClient();",
         "const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;",
         "const shouldUseTurnstile = turnstileEnabled && Boolean(siteKey);",
-        "JSON.stringify({ input, turnstileToken: token })",
-        "turnstileRef.current?.execute?.();",
-        "options={{ execution: \"execute\" }}",
+        "globalThis as any)?.turnstile?.getResponse?.()",
+        "Please wait for verification",
+        "JSON.stringify({ input, turnstileToken: token || \"\" })",
         "setTurnstileToken(\"\");",
         "setTurnstileKey((v) => v + 1);",
         "disabled={loading || !input.trim()}",
@@ -667,16 +628,19 @@ def validate_page_security(page_content: str) -> None:
 
 def validate_api_security(api_content: str) -> None:
     required_snippets = [
+        'import { createChatCompletion } from "@/lib/openai";',
         'import { blockedOriginResponse, isRequestFromAllowedOrigin } from "@/lib/request-origin";',
         'import { verifyTurnstileToken } from "@/lib/turnstile";',
         "const TURNSTILE_ENABLED = process.env.TURNSTILE_ENABLED !== \"false\";",
         "if (!isRequestFromAllowedOrigin(req)) {",
         "return blockedOriginResponse();",
-        "if (TURNSTILE_ENABLED) {",
         "const turnstileToken = (body?.turnstileToken || \"\").toString().trim();",
+        "if (TURNSTILE_ENABLED) {",
         "const turnstileResult = await verifyTurnstileToken(turnstileToken, ip);",
         "if (!turnstileResult.success) {",
-        "return NextResponse.json({ error: turnstileResult.error }, { status: 403 });",
+        "return NextResponse.json({ error: turnstileResult.error }, { status: 400 });",
+        "const result = await createChatCompletion(",
+        'const status = message.startsWith("Upstream LLM request failed") ? 502 : 500;',
     ]
     missing = [snippet for snippet in required_snippets if snippet not in api_content]
     if missing:
@@ -718,6 +682,7 @@ def upsert_tools_array_entry(
         raise GenerationError(f"Could not parse {array_name} array in {file_path}")
 
     updated = text[: array_end] + entry_text + text[array_end:]
+    updated = updated.replace("},];", "},\n];").replace("}, ];", "},\n];")
     file_path.write_text(updated, encoding="utf-8")
     return True
 
@@ -744,6 +709,7 @@ def upsert_sitemap_entry(file_path: Path, slug: str) -> bool:
         "    },"
     )
     updated = text[:array_end] + entry + text[array_end:]
+    updated = updated.replace("},];", "},\n];").replace("}, ];", "},\n];")
     file_path.write_text(updated, encoding="utf-8")
     return True
 

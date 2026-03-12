@@ -8,15 +8,42 @@ Context:
 
 Hard constraints:
 - Output must represent a sub-app route, not a standalone app.
-- Do not suggest package.json, next.config.js, tsconfig.json, next-env.d.ts, .vercel, .gitignore, or any layout.tsx.
+- Create only route-level files under:
+  - app/<tool-slug>/page.tsx
+  - app/api/<tool-slug>/route.ts (if backend needed)
+- Required integration file updates:
+  - app/page.tsx
+  - app/tools/page.tsx
+  - app/sitemap.ts
+- Never create or suggest: package.json, next.config.js, tsconfig.json, next-env.d.ts, .vercel/, nested app/, frontend/, standalone api/ folders, or layout.tsx.
+- Tool page must reuse shared layout/component conventions, especially `@/components/ToolLayout`.
 - Tool should work as one page + one API route.
 - Stateless request -> response.
 - No auth, no database.
 - Useful to developers, job seekers, or productivity users.
 - Security is mandatory in generated code:
-  - API route must enforce same-origin checks via request-origin helpers.
-  - API route must verify `turnstileToken` via turnstile helper before processing input.
-  - Frontend must include Turnstile widget and send `turnstileToken`.
+  - API route must enforce same-origin checks via `@/lib/request-origin`.
+  - API route must verify `turnstileToken` via `@/lib/turnstile` before expensive work.
+  - Turnstile failure status must be 400.
+  - Frontend must include Turnstile widget and send `turnstileToken` when available.
+  - Submit button must remain clickable immediately; if token missing while enabled, show exactly: "Please wait for verification".
+- LLM calls in routes must reuse `createChatCompletion` from `@/lib/openai` (no raw OpenAI/Gemini fetch in route files).
+- Error conventions:
+  - Turnstile failure: 400
+  - Input validation: 400
+  - Rate limit: 429 (if rate limiting is present)
+  - Upstream LLM failure: 502
+  - Other server errors: 500
+
+Post-generation validation checklist (must pass or reject output):
+- [ ] No forbidden standalone files/folders are introduced.
+- [ ] `@/components/ToolLayout` is used in tool page.
+- [ ] API route includes same-origin gate.
+- [ ] API route includes Turnstile token extraction + verification.
+- [ ] Frontend includes Turnstile widget/token flow with immediate-click submit behavior.
+- [ ] API route uses `createChatCompletion`, not raw provider fetch.
+- [ ] Status code conventions are respected.
+- [ ] Formatting hygiene: no malformed array endings like `},];`.
 
 Return JSON only:
 {
