@@ -1,35 +1,38 @@
 # startup-factory
 
-Minimal Python + Next.js generator that creates and deploys small stateless AI web tools.
+Python + Next.js generator that adds small AI tools as child routes inside an existing app.
 
 ## Requirements
 
-- Python 3.11
+- Python 3.11+
 - Node.js 18+
-- Vercel CLI installed and authenticated (`vercel login`)
 - OpenAI-compatible API credentials
+- Optional: Vercel CLI authenticated (`vercel login`) if you use `--deploy`
 
 ## Environment variables
 
 ```bash
-# Option A: Gemini (good first manual run)
+# Option A: Gemini
 export GEMINI_API_KEY="..."
-# Optional overrides when using Gemini:
+# Optional Gemini overrides:
 # export OPENAI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai"
 # export OPENAI_MODEL="gemini-2.0-flash"
 
 # Option B: OpenAI-compatible provider
 export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-4o-mini"
-# Optional for OpenAI-compatible providers:
-export OPENAI_BASE_URL="https://api.openai.com/v1"
+# Optional provider override:
+# export OPENAI_BASE_URL="https://api.openai.com/v1"
 
-# Optional: number of idea generation/review attempts before failing
+# Optional: max idea/review retries
 export IDEA_MAX_ATTEMPTS="3"
 
-# Optional: where generated Next.js tools are created
-# Default: ./generated_tools
-export GENERATED_TOOLS_DIR="/home/alpha/Workspace/toolforge-site/apps"
+# Preferred: host app root containing app/layout.tsx
+export APP_ROOT_DIR="/home/alpha/Workspace/tooldeck-site"
+
+# Backward-compatible fallback if APP_ROOT_DIR is unset:
+# if this points to /path/to/site/app, generator infers app root as /path/to/site
+export GENERATED_TOOLS_DIR="/home/alpha/Workspace/tooldeck-site/app"
 ```
 
 ## Run
@@ -39,54 +42,41 @@ cd startup-factory
 python3 generator.py
 ```
 
-Expected console flow:
+Default behavior:
 
-- Generating idea...
-- Idea review: ...
-- Idea selected: ...
-- Creating project...
-- Deploying to Vercel...
-- Deployment URL: ...
+- Generates one route module:
+  - `app/<tool-slug>/page.tsx`
+  - `app/api/<tool-slug>/route.ts`
+- Updates host integration files:
+  - `app/page.tsx`
+  - `app/tools/page.tsx`
+  - `app/sitemap.ts`
+- Skips deployment unless `--deploy` is passed.
 
-Generated project output is written to `generated_tools/<tool-name>/`.
-Deployment metadata is appended to `tools_registry.json`.
-
-To generate directly into another repo folder (example `toolforge-site/apps`):
+Deploy host app:
 
 ```bash
-cd startup-factory
-export GENERATED_TOOLS_DIR="/home/alpha/Workspace/toolforge-site/apps"
-python3 generator.py
+python3 generator.py --deploy
 ```
 
 ## Generate new templates with LLM
 
-Use the template generator to create a brand new template under `templates/<template_name>/`.
+Use the template generator to create a new reusable template under `templates/<template_name>/`.
 
 ```bash
-cd startup-factory
 python3 template_generator.py --idea "Regex explainer for junior developers"
 ```
 
 Useful flags:
 
-- `--dry-run` to generate and review without writing files
-- `--print-manifest` to print the full manifest JSON
-- `--overwrite` to replace an existing template with the same name
-- `--max-attempts 5` to increase generation/review retries
+- `--dry-run`
+- `--print-manifest`
+- `--overwrite`
+- `--max-attempts 5`
 
 ## Notes
 
-- Template variables like `{{target_role}}` are replaced during generation.
-- Idea JSON schema includes `tool_name`, `template`, `description`, `target_user`, and `configuration`.
-- Generator uses a second LLM pass to score and accept/reject ideas before build/deploy.
-- Generated apps are single-page, stateless, no-auth, no-database.
-- API route enforces:
-  - `MAX_REQUESTS_PER_IP = 5` per day
-  - `MAX_TOKENS = 800`
-  - `GLOBAL_MONTHLY_LIMIT = 5000`
-- Registry entries include:
-  - `name`
-  - `url`
-  - `template`
-  - `created_at`
+- Generation contract is constrained to child-route modules, not standalone app skeletons.
+- Duplicate slugs are rejected.
+- Forbidden standalone files are blocked (`package.json`, `next.config.js`, `tsconfig.json`, `next-env.d.ts`, nested `layout.tsx`, etc.).
+- Registry entries include `name`, `route`, `url`, `deployed`, `created_at`.

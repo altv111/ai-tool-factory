@@ -1,45 +1,57 @@
 #!/usr/bin/env python3
-"""startup-factory generator.
+"""startup-factory route generator.
 
 Pipeline:
 1. generate_idea()
-2. select_template()
-3. instantiate_template()
-4. create_project()
-5. deploy_project()
+2. write_route_module()
+3. update site integration files
+4. optionally deploy host app
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-from datetime import date
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 from urllib import error, request
 
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "templates"
 PROMPTS_DIR = BASE_DIR / "prompts"
 GENERATED_DIR = Path(
     os.getenv("GENERATED_TOOLS_DIR", str(BASE_DIR / "generated_tools"))
 ).expanduser()
+APP_ROOT_DIR_ENV = os.getenv("APP_ROOT_DIR", "").strip()
 REGISTRY_PATH = BASE_DIR / "tools_registry.json"
+
+REQUIRED_OUTPUT_FILES = ["app/<tool-slug>/page.tsx", "app/api/<tool-slug>/route.ts"]
+FORBIDDEN_FILENAMES = {
+    "package.json",
+    "next.config.js",
+    "tsconfig.json",
+    "next-env.d.ts",
+    ".vercel",
+    ".gitignore",
+    "layout.tsx",
+}
 
 
 @dataclass
 class Idea:
     tool_name: str
-    template: str
+    tool_slug: str
     description: str
     target_user: str
-    configuration: dict[str, Any]
+    input_placeholder: str
+    output_label: str
+    llm_task: str
 
 
 @dataclass
@@ -51,11 +63,6 @@ class IdeaReview:
 
 class GenerationError(Exception):
     pass
-
-
-def slugify(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
-    return slug or "generated-tool"
 
 
 def load_prompt(filename: str) -> str:
@@ -126,20 +133,31 @@ def parse_idea(raw_content: str) -> Idea:
     except json.JSONDecodeError as exc:
         raise GenerationError(f"Model did not return valid JSON: {raw_content}") from exc
 
-    for key in ["tool_name", "template", "description", "target_user", "configuration"]:
+    required = [
+        "tool_name",
+        "tool_slug",
+        "description",
+        "target_user",
+        "input_placeholder",
+        "output_label",
+        "llm_task",
+    ]
+    for key in required:
         if key not in data:
             raise GenerationError(f"Missing required idea field: {key}")
 
-    configuration = data["configuration"]
-    if not isinstance(configuration, dict):
-        raise GenerationError("'configuration' must be a JSON object")
+    tool_slug = str(data["tool_slug"]).strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", tool_slug):
+        raise GenerationError("tool_slug must match [a-z0-9][a-z0-9-]*")
 
     return Idea(
         tool_name=str(data["tool_name"]).strip(),
-        template=str(data["template"]).strip(),
+        tool_slug=tool_slug,
         description=str(data["description"]).strip(),
         target_user=str(data["target_user"]).strip(),
-        configuration=configuration,
+        input_placeholder=str(data["input_placeholder"]).strip(),
+        output_label=str(data["output_label"]).strip(),
+        llm_task=str(data["llm_task"]).strip(),
     )
 
 
@@ -167,52 +185,116 @@ def parse_idea_review(raw_content: str) -> IdeaReview:
     return IdeaReview(score=score, reason=str(data["reason"]).strip(), decision=decision)
 
 
-def build_idea_prompt() -> str:
-    templates = sorted(available_templates())
-    if not templates:
-        raise GenerationError(
-            "No unused templates found. Add new templates or remove entries from tools_registry.json."
-        )
-    template_list = ", ".join(templates)
+def load_registry() -> list[dict[str, Any]]:
+    if not REGISTRY_PATH.exists():
+        return []
+    try:
+        data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise GenerationError(f"Invalid registry JSON: {REGISTRY_PATH}") from exc
+    if not isinstance(data, list):
+        raise GenerationError(f"Registry must be a JSON list: {REGISTRY_PATH}")
+    return data
+
+
+def append_registry_entry(idea: Idea, deployed_url: str | None) -> None:
+    registry = load_registry()
+    entry = {
+        "name": idea.tool_slug,
+        "route": f"/{idea.tool_slug}",
+        "url": deployed_url,
+        "deployed": bool(deployed_url),
+        "created_at": date.today().isoformat(),
+    }
+    registry.append(entry)
+    REGISTRY_PATH.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+
+def escape_ts_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def existing_tool_slugs(app_root: Path) -> set[str]:
+    app_dir = app_root / "app"
+    if not app_dir.exists():
+        return set()
+
+    ignore = {"api", "about", "privacy", "contact", "tools"}
+    slugs = {
+        page.parent.name
+        for page in app_dir.glob("*/page.tsx")
+        if page.parent.name not in ignore
+    }
+
+    for entry in load_registry():
+        if not isinstance(entry, dict):
+            continue
+        route = entry.get("route")
+        if isinstance(route, str) and route.startswith("/") and len(route) > 1:
+            slugs.add(route[1:])
+
+    return slugs
+
+
+def build_idea_prompt(existing_slugs: set[str], feedback: str) -> str:
     prompt = load_prompt("idea_prompt.txt")
-    return prompt.replace("{{allowed_templates}}", template_list)
+    return (
+        prompt.replace("{{existing_slugs}}", ", ".join(sorted(existing_slugs)) or "none")
+        .replace("{{required_output_files}}", "\n".join(f"- {f}" for f in REQUIRED_OUTPUT_FILES))
+        .replace("{{feedback}}", feedback or "none")
+    )
 
 
-def build_review_prompt(idea: Idea) -> str:
+def build_review_prompt(idea: Idea, existing_slugs: set[str]) -> str:
     prompt = load_prompt("review_prompt.txt")
     idea_json = json.dumps(
         {
             "tool_name": idea.tool_name,
-            "template": idea.template,
+            "tool_slug": idea.tool_slug,
             "description": idea.description,
             "target_user": idea.target_user,
-            "configuration": idea.configuration,
+            "input_placeholder": idea.input_placeholder,
+            "output_label": idea.output_label,
+            "llm_task": idea.llm_task,
         },
         indent=2,
     )
-    return prompt.replace("{{idea_json}}", idea_json)
+    return (
+        prompt.replace("{{idea_json}}", idea_json)
+        .replace("{{existing_slugs}}", ", ".join(sorted(existing_slugs)) or "none")
+        .replace("{{required_output_files}}", "\n".join(f"- {f}" for f in REQUIRED_OUTPUT_FILES))
+    )
 
 
-def review_idea(idea: Idea) -> IdeaReview:
-    review_prompt = build_review_prompt(idea)
+def review_idea(idea: Idea, existing_slugs: set[str]) -> IdeaReview:
+    review_prompt = build_review_prompt(idea, existing_slugs)
     raw = call_openai_compatible(review_prompt)
     return parse_idea_review(raw)
 
 
-def generate_idea() -> tuple[Idea, IdeaReview]:
+def generate_idea(existing_slugs: set[str]) -> tuple[Idea, IdeaReview]:
     max_attempts = max(1, int(os.getenv("IDEA_MAX_ATTEMPTS", "3")))
     latest_review: IdeaReview | None = None
+    feedback = ""
 
     for attempt in range(1, max_attempts + 1):
-        raw_idea = call_openai_compatible(build_idea_prompt())
+        print(f"Idea generation attempt {attempt}/{max_attempts}...")
+        raw_idea = call_openai_compatible(build_idea_prompt(existing_slugs, feedback))
         idea = parse_idea(raw_idea)
-        review = review_idea(idea)
+
+        if idea.tool_slug in existing_slugs:
+            feedback = f"tool_slug '{idea.tool_slug}' already exists; choose a unique slug"
+            print(f"Idea rejected on attempt {attempt}: {feedback}", file=sys.stderr)
+            continue
+
+        review = review_idea(idea, existing_slugs)
         latest_review = review
         print(f"Idea review: {review.score}/10 ({review.decision})")
 
         if review.decision == "accept":
             return idea, review
 
+        feedback = review.reason
         print(f"Idea rejected on attempt {attempt}: {review.reason}", file=sys.stderr)
 
     raise GenerationError(
@@ -221,132 +303,328 @@ def generate_idea() -> tuple[Idea, IdeaReview]:
     )
 
 
-def available_templates(include_used: bool = False) -> set[str]:
-    if not TEMPLATES_DIR.exists():
-        return set()
-    templates = {p.name for p in TEMPLATES_DIR.iterdir() if p.is_dir()}
-    if include_used:
-        return templates
-    return templates - used_templates()
+def render_page_tsx(idea: Idea) -> str:
+    return f'''"use client";
+
+import {{ useState }} from "react";
+import ToolLayout from "@/components/ToolLayout";
+
+export default function {camel_component_name(idea.tool_slug)}Page() {{
+  const [input, setInput] = useState("");
+  const [output, setOutput] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit() {{
+    setLoading(true);
+    setError("");
+    setOutput("");
+
+    try {{
+      const res = await fetch("/api/{idea.tool_slug}", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ input }}),
+      }});
+
+      const data = await res.json();
+      if (!res.ok) {{
+        setError(data.error || "Request failed");
+      }} else {{
+        setOutput(data.output || "");
+      }}
+    }} catch (_err) {{
+      setError("Network error. Try again.");
+    }} finally {{
+      setLoading(false);
+    }}
+  }}
+
+  return (
+    <ToolLayout title="{escape_ts_string(idea.tool_name)}" description="{escape_ts_string(idea.description)}">
+      <textarea
+        rows={{10}}
+        placeholder="{escape_ts_string(idea.input_placeholder)}"
+        value={{input}}
+        onChange={{(e) => setInput(e.target.value)}}
+      />
+      <button onClick={{onSubmit}} disabled={{loading || !input.trim()}}>
+        {{loading ? "Processing..." : "Generate"}}
+      </button>
+
+      {{error && <pre>{{error}}</pre>}}
+      {{output && (
+        <section>
+          <h2>{escape_ts_string(idea.output_label)}</h2>
+          <pre>{{output}}</pre>
+        </section>
+      )}}
+    </ToolLayout>
+  );
+}}
+'''
 
 
-def used_templates() -> set[str]:
-    used: set[str] = set()
-    for entry in load_registry():
-        if not isinstance(entry, dict):
-            continue
-        template = entry.get("template")
-        if isinstance(template, str) and template.strip():
-            used.add(template.strip())
-    return used
+def render_api_route_ts(idea: Idea) -> str:
+    return f'''import {{ NextRequest, NextResponse }} from "next/server";
+
+const MAX_REQUESTS_PER_IP = 10;
+const MAX_TOKENS = 900;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ipCounter = new Map<string, {{ count: number; resetAt: number }}>();
+
+const SYSTEM_PROMPT = `{escape_template_prompt(idea)}`;
+
+function checkIpLimit(ip: string): string | null {{
+  const now = Date.now();
+  const current = ipCounter.get(ip);
+
+  if (!current || now > current.resetAt) {{
+    ipCounter.set(ip, {{ count: 1, resetAt: now + DAY_MS }});
+    return null;
+  }}
+
+  if (current.count >= MAX_REQUESTS_PER_IP) {{
+    return `Rate limit exceeded: max ${{MAX_REQUESTS_PER_IP}} requests per IP per day.`;
+  }}
+
+  current.count += 1;
+  ipCounter.set(ip, current);
+  return null;
+}}
+
+async function callLLM(userInput: string): Promise<string> {{
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const apiKey = openaiKey || geminiKey;
+  if (!apiKey) {{
+    return "LLM placeholder: set OPENAI_API_KEY or GEMINI_API_KEY (plus optional OPENAI_MODEL/OPENAI_BASE_URL) to enable real responses.";
+  }}
+
+  const usingGeminiFallback = Boolean(geminiKey && !openaiKey);
+  const baseUrl = (
+    process.env.OPENAI_BASE_URL ||
+    (usingGeminiFallback
+      ? "https://generativelanguage.googleapis.com/v1beta/openai"
+      : "https://api.openai.com/v1")
+  ).replace(/\\/$/, "");
+  const model = process.env.OPENAI_MODEL || (usingGeminiFallback ? "gemini-2.0-flash" : "gpt-4o-mini");
+
+  const response = await fetch(`${{baseUrl}}/chat/completions`, {{
+    method: "POST",
+    headers: {{
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${{apiKey}}`,
+    }},
+    body: JSON.stringify({{
+      model,
+      max_tokens: MAX_TOKENS,
+      messages: [
+        {{ role: "system", content: SYSTEM_PROMPT }},
+        {{ role: "user", content: userInput }},
+      ],
+    }}),
+  }});
+
+  if (!response.ok) {{
+    const errorText = await response.text();
+    throw new Error(`LLM error: ${{errorText}}`);
+  }}
+
+  const data = await response.json();
+  return data?.choices?.[0]?.message?.content || "No output generated.";
+}}
+
+export async function POST(req: NextRequest) {{
+  try {{
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+
+    const ipError = checkIpLimit(ip);
+    if (ipError) {{
+      return NextResponse.json({{ error: ipError }}, {{ status: 429 }});
+    }}
+
+    const body = await req.json();
+    const input = (body?.input || "").toString().trim();
+
+    if (!input) {{
+      return NextResponse.json({{ error: "Input is required." }}, {{ status: 400 }});
+    }}
+
+    const output = await callLLM(input);
+    return NextResponse.json({{ output }});
+  }} catch (err) {{
+    const message = err instanceof Error ? err.message : "Unknown server error.";
+    return NextResponse.json({{ error: message }}, {{ status: 500 }});
+  }}
+}}
+'''
 
 
-def select_template(idea: Idea) -> str:
-    templates = available_templates()
-    if not templates:
-        raise GenerationError(
-            "No unused templates available. Add a new template or clear used entries from tools_registry.json."
-        )
-    if idea.template in templates:
-        return idea.template
-    if idea.template in available_templates(include_used=True):
-        raise GenerationError(f"Template already used: {idea.template}")
-    raise GenerationError(f"Unknown template: {idea.template}")
+def escape_template_prompt(idea: Idea) -> str:
+    lines = [
+        f"You are {idea.tool_name}.",
+        f"Description: {idea.description}",
+        f"Target user: {idea.target_user}",
+        f"Task: {idea.llm_task}",
+        "Output must be concise, practical, and directly actionable.",
+    ]
+    return "\\n".join(lines).replace("`", "'")
 
 
-def read_template_defaults(template_path: Path) -> dict[str, Any]:
-    cfg_path = template_path / "template_config.json"
-    if not cfg_path.exists():
-        return {}
-    data = json.loads(cfg_path.read_text(encoding="utf-8"))
-    return data.get("default_configuration", {}) if isinstance(data, dict) else {}
+def camel_component_name(slug: str) -> str:
+    parts = slug.split("-")
+    return "".join(p[:1].upper() + p[1:] for p in parts if p)
 
 
-def merge_configuration(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    merged.update(override)
-    return merged
+def resolve_app_root() -> Path:
+    if APP_ROOT_DIR_ENV:
+        app_root = Path(APP_ROOT_DIR_ENV).expanduser()
+    else:
+        generated = GENERATED_DIR
+        if generated.name == "app" and (generated / "layout.tsx").exists():
+            app_root = generated.parent
+        elif (generated / "app" / "layout.tsx").exists():
+            app_root = generated
+        else:
+            raise GenerationError(
+                "Unable to infer app root. Set APP_ROOT_DIR to your Next.js app root "
+                "(directory containing app/layout.tsx)."
+            )
+
+    if not (app_root / "app" / "layout.tsx").exists():
+        raise GenerationError(f"Not a valid app root (missing app/layout.tsx): {app_root}")
+    return app_root
 
 
-def replace_tokens(text: str, variables: dict[str, Any]) -> str:
-    out = text
-    for key, value in variables.items():
-        out = out.replace(f"{{{{{key}}}}}", str(value))
-    return out
+def write_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
-def instantiate_template(source_dir: Path, destination_dir: Path, variables: dict[str, Any]) -> None:
-    if destination_dir.exists():
-        shutil.rmtree(destination_dir)
-    shutil.copytree(source_dir, destination_dir)
+def upsert_tools_array_entry(
+    file_path: Path,
+    href: str,
+    entry_text: str,
+    *,
+    array_name: str = "TOOLS",
+) -> bool:
+    text = file_path.read_text(encoding="utf-8")
+    if f'href: "{href}"' in text:
+        return False
 
-    for path in destination_dir.rglob("*"):
-        if not path.is_file():
-            continue
-        try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        updated = replace_tokens(content, variables)
-        if updated != content:
-            path.write_text(updated, encoding="utf-8")
+    marker = f"const {array_name} = ["
+    start = text.find(marker)
+    if start == -1:
+        raise GenerationError(f"Could not find '{marker}' in {file_path}")
 
+    array_start = text.find("[", start)
+    array_end = text.find("];", array_start)
+    if array_start == -1 or array_end == -1:
+        raise GenerationError(f"Could not parse {array_name} array in {file_path}")
 
-def ensure_nextjs_project(project_dir: Path) -> None:
-    frontend_src = project_dir / "frontend" / "page.tsx"
-    api_src = project_dir / "api" / "route.ts"
-
-    app_dir = project_dir / "app"
-    api_dir = app_dir / "api" / "generate"
-    api_dir.mkdir(parents=True, exist_ok=True)
-
-    if frontend_src.exists():
-        shutil.copyfile(frontend_src, app_dir / "page.tsx")
-    if api_src.exists():
-        shutil.copyfile(api_src, api_dir / "route.ts")
+    updated = text[: array_end] + entry_text + text[array_end:]
+    file_path.write_text(updated, encoding="utf-8")
+    return True
 
 
-def create_project(idea: Idea, template_name: str) -> Path:
-    template_dir = TEMPLATES_DIR / template_name
-    if not template_dir.exists():
-        raise GenerationError(f"Template not found: {template_dir}")
+def upsert_sitemap_entry(file_path: Path, slug: str) -> bool:
+    text = file_path.read_text(encoding="utf-8")
+    needle = f"${{baseUrl}}/{slug}"
+    if needle in text:
+        return False
 
-    defaults = read_template_defaults(template_dir)
-    config = merge_configuration(defaults, idea.configuration)
+    return_start = text.find("return [")
+    if return_start == -1:
+        raise GenerationError(f"Could not find sitemap return array in {file_path}")
 
-    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    slug = slugify(idea.tool_name)
-    project_dir = GENERATED_DIR / slug
+    array_start = text.find("[", return_start)
+    array_end = text.find("];", array_start)
+    if array_start == -1 or array_end == -1:
+        raise GenerationError(f"Could not parse sitemap array in {file_path}")
 
-    variables = {
-        **config,
-        "tool_name": idea.tool_name,
-        "tool_slug": slug,
-        "description": idea.description,
-        "target_user": idea.target_user,
-        "template": template_name,
+    entry = (
+        "\n    {\n"
+        f"      url: `${{baseUrl}}/{slug}`,\n"
+        "      lastModified,\n"
+        "    },"
+    )
+    updated = text[:array_end] + entry + text[array_end:]
+    file_path.write_text(updated, encoding="utf-8")
+    return True
+
+
+def validate_output_paths(written_relative_paths: set[str], slug: str) -> None:
+    allowed = {
+        f"app/{slug}/page.tsx",
+        f"app/api/{slug}/route.ts",
+        "app/page.tsx",
+        "app/tools/page.tsx",
+        "app/sitemap.ts",
     }
 
-    instantiate_template(template_dir, project_dir, variables)
-    ensure_nextjs_project(project_dir)
+    extra = sorted(p for p in written_relative_paths if p not in allowed)
+    if extra:
+        raise GenerationError("Generated forbidden file paths: " + ", ".join(extra))
 
-    (project_dir / "generated_config.json").write_text(
-        json.dumps(
-            {
-                "tool_name": idea.tool_name,
-                "tool_slug": slug,
-                "template": template_name,
-                "description": idea.description,
-                "target_user": idea.target_user,
-                "configuration": config,
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    for path in written_relative_paths:
+        parts = Path(path).parts
+        if any(part in FORBIDDEN_FILENAMES for part in parts):
+            raise GenerationError(f"Forbidden filename generated: {path}")
+
+
+def create_route_module(app_root: Path, idea: Idea) -> set[str]:
+    app_dir = app_root / "app"
+    route_page = app_dir / idea.tool_slug / "page.tsx"
+    api_route = app_dir / "api" / idea.tool_slug / "route.ts"
+
+    if route_page.exists() or api_route.exists():
+        raise GenerationError(f"Route already exists for slug: {idea.tool_slug}")
+
+    write_file(route_page, render_page_tsx(idea))
+    write_file(api_route, render_api_route_ts(idea))
+
+    home_page = app_dir / "page.tsx"
+    tools_page = app_dir / "tools" / "page.tsx"
+    sitemap = app_dir / "sitemap.ts"
+
+    for required in [home_page, tools_page, sitemap]:
+        if not required.exists():
+            raise GenerationError(f"Required integration file not found: {required}")
+
+    updated_home = upsert_tools_array_entry(
+        home_page,
+        f"/{idea.tool_slug}",
+        (
+            "\n  {\n"
+            f'    href: "/{idea.tool_slug}",\n'
+            f'    label: "{escape_ts_string(idea.tool_name)}",\n'
+            f'    description: "{escape_ts_string(idea.description)}",\n'
+            "  },"
+        ),
     )
+    updated_tools = upsert_tools_array_entry(
+        tools_page,
+        f"/{idea.tool_slug}",
+        f'\n  {{ href: "/{idea.tool_slug}", label: "{escape_ts_string(idea.tool_name)}" }},',
+    )
+    updated_sitemap = upsert_sitemap_entry(sitemap, idea.tool_slug)
 
-    return project_dir
+    if not updated_home or not updated_tools or not updated_sitemap:
+        raise GenerationError(
+            "Integration update failed. One or more files already contained this slug."
+        )
+
+    written = {
+        f"app/{idea.tool_slug}/page.tsx",
+        f"app/api/{idea.tool_slug}/route.ts",
+        "app/page.tsx",
+        "app/tools/page.tsx",
+        "app/sitemap.ts",
+    }
+    validate_output_paths(written, idea.tool_slug)
+    return written
 
 
 def extract_url(text: str) -> str | None:
@@ -354,11 +632,10 @@ def extract_url(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def deploy_project(project_dir: Path) -> str:
-    cmd = ["vercel", "deploy", "--yes"]
+def deploy_host_app(app_root: Path) -> str:
     proc = subprocess.run(
-        cmd,
-        cwd=project_dir,
+        ["vercel", "deploy", "--yes"],
+        cwd=app_root,
         text=True,
         capture_output=True,
         check=False,
@@ -373,51 +650,47 @@ def deploy_project(project_dir: Path) -> str:
         )
     if not url:
         raise GenerationError(f"Deploy succeeded but no URL detected.\n{combined}")
-
     return url
 
 
-def load_registry() -> list[dict[str, Any]]:
-    if not REGISTRY_PATH.exists():
-        return []
-    try:
-        data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise GenerationError(f"Invalid registry JSON: {REGISTRY_PATH}") from exc
-    if not isinstance(data, list):
-        raise GenerationError(f"Registry must be a JSON list: {REGISTRY_PATH}")
-    return data
-
-
-def append_registry_entry(template_name: str, project_dir: Path, deployed_url: str) -> None:
-    registry = load_registry()
-    entry = {
-        "name": project_dir.name,
-        "url": deployed_url,
-        "template": template_name,
-        "created_at": date.today().isoformat(),
-    }
-    registry.append(entry)
-    REGISTRY_PATH.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Generate an in-app child route tool for a Next.js app."
+    )
+    parser.add_argument(
+        "--deploy",
+        action="store_true",
+        help="Deploy host app to Vercel after generating route files.",
+    )
+    return parser.parse_args()
 
 
 def main() -> int:
+    args = parse_args()
     try:
+        app_root = resolve_app_root()
+        existing_slugs = existing_tool_slugs(app_root)
+
         print("Generating idea...")
-        idea, _review = generate_idea()
+        idea, _review = generate_idea(existing_slugs)
 
-        template_name = select_template(idea)
-        print(f"Idea selected: {idea.tool_name}")
+        print(f"Creating child route: /{idea.tool_slug}")
+        written = create_route_module(app_root, idea)
+        print("Updated files:")
+        for path in sorted(written):
+            print(f"- {path}")
 
-        print("Creating project...")
-        project_dir = create_project(idea, template_name)
+        deployed_url: str | None = None
+        if args.deploy:
+            print("Deploying host app to Vercel...")
+            deployed_url = deploy_host_app(app_root)
+            print("Deployment URL:")
+            print(deployed_url)
+        else:
+            print("Skipping deploy. Pass --deploy to enable Vercel deployment.")
 
-        print("Deploying to Vercel...")
-        url = deploy_project(project_dir)
-        append_registry_entry(template_name, project_dir, url)
-
-        print("Deployment URL:")
-        print(url)
+        append_registry_entry(idea, deployed_url)
+        print("Done.")
         return 0
     except GenerationError as exc:
         print(f"Error: {exc}", file=sys.stderr)

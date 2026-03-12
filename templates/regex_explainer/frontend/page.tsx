@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState } from 'react';
 
 const HomePage = () => {
@@ -5,7 +7,7 @@ const HomePage = () => {
   const [explanation, setExplanation] = useState('');
 
   const handleExplain = async () => {
-    const response = await fetch('/api/explain', {
+    const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pattern }),

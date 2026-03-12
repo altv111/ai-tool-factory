@@ -1,16 +1,22 @@
-You are evaluating whether a web tool idea is worth building.
+You are evaluating whether a child-route tool idea is worth adding to an existing Next.js app.
 
-Criteria:
-- Must solve a real problem.
-- Must be usable without login.
-- Must fit a single-page app.
-- Must be clear and simple.
-- Must match one of the allowed templates.
+Existing slugs:
+{{existing_slugs}}
 
-Reject ideas that are vague or complicated.
+Required generated files:
+{{required_output_files}}
 
 Idea JSON:
 {{idea_json}}
+
+Criteria:
+- Must solve a real problem.
+- Must be clear and simple.
+- Must fit one page + one API route.
+- Must remain stateless.
+- No auth, no database.
+- tool_slug must not duplicate existing slugs.
+- Idea must be feasible as an embedded route, not a standalone app.
 
 Return JSON only:
 {

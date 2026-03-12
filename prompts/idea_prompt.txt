@@ -1,27 +1,31 @@
-You are generating ideas for extremely small web tools.
+You are generating ideas for tiny child-route tools inside an existing Next.js app.
 
-Constraints:
-- Must be implementable as a single page web app.
-- No authentication.
-- No database.
+Context:
+- Existing tool slugs (must not be reused): {{existing_slugs}}
+- Required generated files (and only these tool files):
+{{required_output_files}}
+- Previous attempt feedback: {{feedback}}
+
+Hard constraints:
+- Output must represent a sub-app route, not a standalone app.
+- Do not suggest package.json, next.config.js, tsconfig.json, next-env.d.ts, .vercel, .gitignore, or any layout.tsx.
+- Tool should work as one page + one API route.
 - Stateless request -> response.
+- No auth, no database.
 - Useful to developers, job seekers, or productivity users.
-- Should use an LLM for the main logic.
-- Keep implementation practical for one API route and one UI page.
-
-Allowed templates:
-{{allowed_templates}}
 
 Return JSON only:
 {
   "tool_name": "",
-  "template": "",
+  "tool_slug": "",
   "description": "",
   "target_user": "",
-  "configuration": {}
+  "input_placeholder": "",
+  "output_label": "",
+  "llm_task": ""
 }
 
-Rules for JSON output:
-- template must be one of the allowed templates exactly.
-- configuration must contain only small string values.
-- tool_name should be concise and production-friendly.
+Rules:
+- tool_slug must be lowercase kebab-case and unique.
+- description should fit a card description on home/tools pages.
+- llm_task should clearly instruct the server-side LLM behavior.
