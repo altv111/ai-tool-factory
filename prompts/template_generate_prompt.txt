@@ -28,6 +28,11 @@ Hard constraints:
 - No auth and no database.
 - Use one API route file at api/route.ts and one UI at frontend/page.tsx.
 - Use `@/components/ToolLayout` in frontend/page.tsx.
+- Ensure generated route can be wrapped with SEO metadata (`toolMetadata(...)`) and supports indexable sections:
+  - `What is <Tool>?`
+  - `Example Inputs`
+  - `How It Works`
+  - `Common Use Cases`
 - API route must use:
   - `@/lib/request-origin`
   - `@/lib/turnstile`

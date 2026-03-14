@@ -22,10 +22,13 @@ Criteria:
   - update app/page.tsx, app/tools/page.tsx, app/sitemap.ts
   - no standalone project files/folders
   - shared `@/components/ToolLayout` usage
+  - metadata via `toolMetadata(...)` with canonical slug path
+  - indexable content sections (`What is`, `Example Inputs`, `How It Works`, `Common Use Cases`)
   - same-origin gate in API route
   - Turnstile verification before expensive work
   - frontend Turnstile token flow and immediate-click submit UX
-  - `createChatCompletion` usage for LLM routes
+  - `createChatCompletion` usage for LLM routes only
+  - deterministic routes should avoid LLM dependency
   - status convention compliance (400/429/502/500)
 
 Reject the idea if likely to violate any checklist item.

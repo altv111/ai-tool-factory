@@ -27,5 +27,104 @@
     "deployed": false,
     "template": null,
     "created_at": "2026-03-12"
+  },
+  {
+    "name": "csv-to-json",
+    "route": "/csv-to-json",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "deterministic",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "commit-message-generator",
+    "route": "/commit-message-generator",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "llm",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "json-to-csv",
+    "route": "/json-to-csv",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "deterministic",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "stack-trace-explainer",
+    "route": "/stack-trace-explainer",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "llm",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "base64-encoder-decoder",
+    "route": "/base64-encoder-decoder",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "deterministic",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "pr-description-generator",
+    "route": "/pr-description-generator",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "llm",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "html-to-markdown",
+    "route": "/html-to-markdown",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "deterministic",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "jwt-decoder",
+    "route": "/jwt-decoder",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "deterministic",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "url-encoder-decoder",
+    "route": "/url-encoder-decoder",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "deterministic",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "release-notes-generator",
+    "route": "/release-notes-generator",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "llm",
+    "created_at": "2026-03-14"
+  },
+  {
+    "name": "api-documentation-generator",
+    "route": "/api-documentation-generator",
+    "url": null,
+    "deployed": false,
+    "template": null,
+    "mode": "llm",
+    "created_at": "2026-03-14"
   }
 ]

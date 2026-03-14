@@ -17,6 +17,9 @@ Hard constraints:
   - app/sitemap.ts
 - Never create or suggest: package.json, next.config.js, tsconfig.json, next-env.d.ts, .vercel/, nested app/, frontend/, standalone api/ folders, or layout.tsx.
 - Tool page must reuse shared layout/component conventions, especially `@/components/ToolLayout`.
+- Tool route must be SEO-ready:
+  - use `toolMetadata(...)` from `@/lib/seo` for title, description, and canonical.
+  - include indexable on-page sections: `What is`, `Example Inputs`, `How It Works`, `Common Use Cases`.
 - Tool should work as one page + one API route.
 - Stateless request -> response.
 - No auth, no database.
@@ -28,6 +31,10 @@ Hard constraints:
   - Frontend must include Turnstile widget and send `turnstileToken` when available.
   - Submit button must remain clickable immediately; if token missing while enabled, show exactly: "Please wait for verification".
 - LLM calls in routes must reuse `createChatCompletion` from `@/lib/openai` (no raw OpenAI/Gemini fetch in route files).
+- Support two implementation styles:
+  - `implementation_mode: "deterministic"` when task can be done with local deterministic logic.
+  - `implementation_mode: "llm"` when model reasoning/generation is genuinely required.
+- Prefer `deterministic` whenever feasible.
 - Error conventions:
   - Turnstile failure: 400
   - Input validation: 400
@@ -38,10 +45,13 @@ Hard constraints:
 Post-generation validation checklist (must pass or reject output):
 - [ ] No forbidden standalone files/folders are introduced.
 - [ ] `@/components/ToolLayout` is used in tool page.
+- [ ] Metadata uses `toolMetadata(...)` with canonical `/<tool-slug>`.
+- [ ] On-page SEO sections exist below the tool UI.
 - [ ] API route includes same-origin gate.
 - [ ] API route includes Turnstile token extraction + verification.
 - [ ] Frontend includes Turnstile widget/token flow with immediate-click submit behavior.
 - [ ] API route uses `createChatCompletion`, not raw provider fetch.
+- [ ] `implementation_mode` is correctly chosen (`deterministic` preferred when feasible).
 - [ ] Status code conventions are respected.
 - [ ] Formatting hygiene: no malformed array endings like `},];`.
 
@@ -53,10 +63,12 @@ Return JSON only:
   "target_user": "",
   "input_placeholder": "",
   "output_label": "",
-  "llm_task": ""
+  "llm_task": "",
+  "implementation_mode": ""
 }
 
 Rules:
 - tool_slug must be lowercase kebab-case and unique.
 - description should fit a card description on home/tools pages.
-- llm_task should clearly instruct the server-side LLM behavior.
+- llm_task should clearly instruct the server-side behavior (can describe deterministic transform rules too).
+- implementation_mode must be either `deterministic` or `llm`.

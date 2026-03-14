@@ -52,6 +52,7 @@ Default behavior:
 
 - Generates one route module:
   - `app/<tool-slug>/page.tsx`
+  - `app/<tool-slug>/<ToolName>Client.tsx`
   - `app/api/<tool-slug>/route.ts`
 - Updates host integration files:
   - `app/page.tsx`
@@ -69,6 +70,25 @@ Steer specific ideas:
 
 ```bash
 python3 generator.py --template regex_explainer --idea "Regex debugging helper for interview prep"
+```
+
+Choose implementation mode:
+
+```bash
+# Default: LLM-generated deterministic transform when no builtin matches
+python3 generator.py --idea "JSON to CSV converter"
+
+# Auto: prefers deterministic when feasible (builtin match first, fallback cleanup)
+python3 generator.py --mode auto --idea "JSON to CSV converter"
+
+# Force deterministic (no LLM route dependency)
+python3 generator.py --mode deterministic --idea "JSON to CSV converter"
+
+# Force LLM route
+python3 generator.py --mode llm --idea "Explain stack traces with fixes"
+
+# Ask LLM to synthesize deterministic transform code when no builtin strategy matches
+python3 generator.py --mode llm-generate-deterministic --idea "URL encoder/decoder"
 ```
 
 Deploy host app:
@@ -97,8 +117,19 @@ Useful flags:
 - Generation contract is constrained to child-route modules, not standalone app skeletons.
 - Duplicate slugs are rejected.
 - Forbidden standalone files are blocked (`package.json`, `next.config.js`, `tsconfig.json`, `next-env.d.ts`, nested `layout.tsx`, etc.).
+- SEO defaults are baked in:
+  - route `page.tsx` uses `toolMetadata(...)` from `@/lib/seo`
+  - canonical path is `/<tool-slug>`
+  - generated client pages include indexable sections (`What is`, `Example Inputs`, `How It Works`, `Common Use Cases`)
 - Security requirements are mandatory in generated files:
   - same-origin API gate via `@/lib/request-origin`
   - Turnstile verification via `@/lib/turnstile`
   - frontend Turnstile token flow via `react-turnstile`
 - Registry entries include `name`, `route`, `url`, `deployed`, `created_at`.
+- Registry entries also include `mode` and `template` when present.
+- Built-in deterministic transforms are maintained in `deterministic_strategies/` (one file per strategy) to keep `generator.py` from becoming a large strategy dump.
+- Current built-in deterministic packs include:
+  - `table_format_converter` (JSON <-> CSV)
+  - `base64_codec`
+  - `text_cleanup` fallback
+- LLM profile packs are defined in `llm_profiles.py` (for example `dev_doc_writer` for commit/PR/release/readme/api-doc style tools).

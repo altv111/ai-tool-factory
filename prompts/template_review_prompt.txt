@@ -20,6 +20,7 @@ Review criteria:
   - `@/lib/openai` (`createChatCompletion`)
 - Frontend and API files are coherent with placeholders.
 - Frontend uses `@/components/ToolLayout` and Turnstile token flow.
+- Frontend content supports indexable SEO sections and clear H1/intro usage via shared layout.
 - template_config.json looks valid and usable.
 
 Return JSON only:

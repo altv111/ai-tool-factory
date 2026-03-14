@@ -1,0 +1,19 @@
+You are generating a deterministic TypeScript transform for a Next.js API route.
+
+Idea JSON:
+{{idea_json}}
+
+Output JSON only with this shape:
+{
+  "kind": "short_snake_case_name",
+  "description": "one sentence",
+  "transform_function_code": "function transformInput(input: string): string { ... }"
+}
+
+Requirements:
+- The transform must be deterministic and local-only.
+- No network calls, no LLM calls, no environment variables.
+- No imports in transform_function_code.
+- The function must throw Error for invalid input.
+- Keep output practical and predictable for production use.
+- Use pure TypeScript/JavaScript string/object/array operations.
